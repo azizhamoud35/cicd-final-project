@@ -1,0 +1,134 @@
+apiVersion: tekton.dev/v1beta1
+kind: Task
+metadata:
+  name: cleanup
+  namespace: final-project
+spec:
+  description: >-
+    This task removes old files from previous pipeline runs to keep the workspace clean.
+  params:
+    - name: path
+      type: string
+      default: /workspace/old-files
+  steps:
+    - name: remove-old-files
+      image: alpine:latest
+      script: |
+        #!/bin/sh
+        echo "Cleaning up old files from previous runs..."
+        rm -rf $(params.path)/*
+        echo "Cleanup complete."
+
+---
+apiVersion: tekton.dev/v1beta1
+kind: Task
+metadata:
+  name: test
+  namespace: final-project
+spec:
+  description: >-
+    This task runs the unit tests using nose.
+  steps:
+    - name: run-nose-tests
+      image: python:3.9
+      script: |
+        #!/bin/bash
+        echo "Running unit tests with nose..."
+        pip install -r requirements.txt
+        pip install nose flask
+        nosetests -v
+        echo "Tests completed."
+
+---
+apiVersion: tekton.dev/v1beta1
+kind: Task
+metadata:
+  name: git-clone
+  namespace: final-project
+spec:
+  description: >-
+    This task clones the source repository from GitHub.
+  params:
+    - name: repo-url
+      type: string
+      description: Git repository URL to clone
+    - name: revision
+      type: string
+      default: main
+  steps:
+    - name: clone-repo
+      image: alpine/git:latest
+      script: |
+        #!/bin/sh
+        echo "Cloning repository $(params.repo-url) ..."
+        git clone $(params.repo-url) /workspace/source
+        cd /workspace/source
+        git checkout $(params.revision)
+        echo "Repository cloned successfully."
+
+---
+apiVersion: tekton.dev/v1beta1
+kind: Task
+metadata:
+  name: flake8
+  namespace: final-project
+spec:
+  description: >-
+    This task runs flake8 linting on the Python source code.
+  steps:
+    - name: run-flake8
+      image: python:3.9
+      script: |
+        #!/bin/bash
+        echo "Running flake8 linting..."
+        pip install flake8
+        flake8 . --count --select=E9,F63,F7,F82 --show-source --statistics
+        echo "Linting completed."
+
+---
+apiVersion: tekton.dev/v1beta1
+kind: Task
+metadata:
+  name: buildah
+  namespace: final-project
+spec:
+  description: >-
+    This task builds a container image using Buildah.
+  params:
+    - name: image
+      type: string
+      description: Name of the image to build
+  steps:
+    - name: build-image
+      image: quay.io/buildah/upstream:latest
+      script: |
+        #!/bin/sh
+        echo "Building container image $(params.image) with Buildah..."
+        buildah bud -t $(params.image) .
+        echo "Image build completed."
+
+---
+apiVersion: tekton.dev/v1beta1
+kind: Task
+metadata:
+  name: deploy
+  namespace: final-project
+spec:
+  description: >-
+    This task deploys the application to OpenShift.
+  params:
+    - name: image
+      type: string
+      description: Image to deploy
+    - name: app-name
+      type: string
+      default: final-project
+  steps:
+    - name: deploy-to-openshift
+      image: quay.io/openshift/origin-cli:latest
+      script: |
+        #!/bin/sh
+        echo "Deploying application $(params.app-name) to OpenShift..."
+        oc new-app --name=$(params.app-name) --image=$(params.image)
+        oc expose svc/$(params.app-name)
+        echo "Deployment completed."
